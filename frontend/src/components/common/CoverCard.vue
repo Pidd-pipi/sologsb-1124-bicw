@@ -2,6 +2,7 @@
 import type { Cover } from '@/types/cover'
 import { joinCn } from '@/utils/id'
 import ScarceTag from './ScarceTag.vue'
+import LoanStatusTag from './LoanStatusTag.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -10,9 +11,22 @@ const props = withDefaults(
     stampCount?: number
     /** 关联邮戳数，行内展示 */
     pmCount?: number
+    /** 当前是否外借中 */
+    loanActive?: boolean
+    /** 逾期天数（0 表示未逾期） */
+    overdueDays?: number
+    /** 当前借用人，外借中展示 */
+    borrower?: string
     active?: boolean
   }>(),
-  { stampCount: 0, pmCount: 0, active: false }
+  {
+    stampCount: 0,
+    pmCount: 0,
+    loanActive: false,
+    overdueDays: 0,
+    borrower: '',
+    active: false
+  }
 )
 
 const emit = defineEmits<{ select: [cover: Cover] }>()
@@ -38,6 +52,7 @@ function routeText(cover: Cover): string {
         <span class="cover-card__tags">
           <el-tag v-if="cover.registered" size="small" type="danger" effect="plain">给据</el-tag>
           <ScarceTag :level="cover.conditionGrade" kind="grade" />
+          <LoanStatusTag :active="loanActive" :overdue-days="overdueDays" />
         </span>
       </header>
       <p class="cover-card__route">{{ routeText(cover) }}</p>
@@ -47,7 +62,11 @@ function routeText(cover: Cover): string {
       <p class="cover-card__meta">
         贴票 {{ stampCount }} 枚 · 关联邮戳 {{ pmCount }} 枚
       </p>
-      <p class="cover-card__via">中转：{{ joinCn(cover.viaPoints, '直封') }}</p>
+      <p v-if="loanActive" class="cover-card__loan" :class="{ 'is-overdue': overdueDays > 0 }">
+        外借：{{ borrower || '借用人未记'
+        }}<template v-if="overdueDays > 0"> · 已逾期 {{ overdueDays }} 天</template>
+      </p>
+      <p v-else class="cover-card__via">中转：{{ joinCn(cover.viaPoints, '直封') }}</p>
     </div>
   </article>
 </template>
@@ -121,5 +140,17 @@ function routeText(cover: Cover): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.cover-card__loan {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b7791f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cover-card__loan.is-overdue {
+  color: #c0392b;
 }
 </style>

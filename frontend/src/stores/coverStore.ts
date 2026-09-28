@@ -70,6 +70,9 @@ export const useCoverStore = defineStore('cover', () => {
     await db.covers.delete(id)
     const own = await db.stampEntries.where('coverId').equals(id).toArray()
     await db.stampEntries.bulkDelete(own.map((e) => e.id).filter((v): v is number => typeof v === 'number'))
+    // 级联清理该封的借出 / 归还流转记录
+    const loanKeys = await db.loans.where('coverId').equals(id).primaryKeys()
+    await db.loans.bulkDelete(loanKeys)
     await load()
   }
 

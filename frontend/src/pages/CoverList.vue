@@ -5,8 +5,10 @@ import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import CoverCard from '@/components/common/CoverCard.vue'
 import ScarceTag from '@/components/common/ScarceTag.vue'
+import LoanStatusTag from '@/components/common/LoanStatusTag.vue'
 import { useCatalogFilter } from '@/hooks/useCatalogFilter'
 import { useCoverStore } from '@/stores/coverStore'
+import { useLoanStore } from '@/stores/loanStore'
 import { usePostmarkStore } from '@/stores/postmarkStore'
 import { useRouteStore } from '@/stores/routeStore'
 import type { ImagePayload } from '@/stores/postmarkStore'
@@ -17,6 +19,7 @@ import { joinCn, nowIso, toNumber } from '@/utils/id'
 
 const router = useRouter()
 const coverStore = useCoverStore()
+const loanStore = useLoanStore()
 const postmarkStore = usePostmarkStore()
 const routeStore = useRouteStore()
 
@@ -34,6 +37,7 @@ onMounted(async () => {
   if (!coverStore.loaded) await coverStore.load()
   if (!postmarkStore.loaded) await postmarkStore.load()
   if (!routeStore.loaded) await routeStore.load()
+  if (!loanStore.loaded) await loanStore.load()
 })
 
 watch(
@@ -164,6 +168,10 @@ function routeLabel(routeId: number | null): string {
   const route = routeStore.byId(routeId)
   return route ? `${route.routeNo} ${route.name}` : `邮路 #${routeId}`
 }
+
+function activeLoanFor(cover: Cover) {
+  return typeof cover.id === 'number' ? loanStore.activeOf(cover.id) : null
+}
 </script>
 
 <template>
@@ -172,7 +180,8 @@ function routeLabel(routeId: number | null): string {
       <div>
         <h1 class="gb-page__title">实寄封目录</h1>
         <p class="gb-page__subtitle">
-          共 {{ coverStore.total }} 封，其中给据邮件 {{ coverStore.registeredCount }} 封；按收寄地、年代、品相、是否给据筛选。
+          共 {{ coverStore.total }} 封，其中给据邮件 {{ coverStore.registeredCount }} 封、外借中
+          {{ loanStore.activeCount }} 封；按收寄地、年代、品相、是否给据筛选。
         </p>
       </div>
       <div class="cover-page__actions">
@@ -231,6 +240,9 @@ function routeLabel(routeId: number | null): string {
         :cover="cover"
         :stamp-count="coverStore.frankingCount(cover)"
         :pm-count="coverStore.cancelCount(cover)"
+        :loan-active="loanStore.isOnLoan(cover.id)"
+        :overdue-days="loanStore.overdueDaysOf(cover.id)"
+        :borrower="activeLoanFor(cover)?.borrower ?? ''"
         @select="openDetail"
       />
     </div>
@@ -261,6 +273,17 @@ function routeLabel(routeId: number | null): string {
       </el-table-column>
       <el-table-column label="给据" width="80">
         <template #default="{ row }">{{ row.registered ? '是' : '否' }}</template>
+      </el-table-column>
+      <el-table-column label="流转状态" min-width="150">
+        <template #default="{ row }">
+          <LoanStatusTag
+            :active="loanStore.isOnLoan(row.id)"
+            :overdue-days="loanStore.overdueDaysOf(row.id)"
+          />
+          <span v-if="activeLoanFor(row)" class="cover-page__loan-borrower">
+            {{ activeLoanFor(row)?.borrower || '借用人未记' }}
+          </span>
+        </template>
       </el-table-column>
       <el-table-column label="邮路" min-width="150">
         <template #default="{ row }">{{ routeLabel(row.routeId) }}</template>
@@ -514,5 +537,10 @@ function routeLabel(routeId: number | null): string {
 .cover-page__pm-list strong {
   color: #5d3325;
   min-width: 84px;
+}
+.cover-page__loan-borrower {
+  margin-left: 6px;
+  font-size: 12px;
+  color: #7c6a54;
 }
 </style>

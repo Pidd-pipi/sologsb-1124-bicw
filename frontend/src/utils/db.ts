@@ -8,10 +8,12 @@ import type { Cover } from '@/types/cover'
 import type { PostalRoute } from '@/types/route'
 import type { StamplessEntry } from '@/types/stampentry'
 import type { AssetOwnerType, AssetSide, CatalogAsset } from '@/types/asset'
+import type { CoverLoan } from '@/types/loan'
+import { addDays, todayLocal } from '@/utils/dateRange'
 
 export const DB_NAME = 'gbpostmark'
 /** 当前数据结构版本号，升级迁移写在下面对应的 version() 中 */
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 export class GbPostmarkDatabase extends Dexie {
   postmarks!: Table<Postmark, number>
@@ -20,6 +22,8 @@ export class GbPostmarkDatabase extends Dexie {
   stampEntries!: Table<StamplessEntry, number>
   /** 戳样 / 封图原图，单独建表 */
   assets!: Table<CatalogAsset, number>
+  /** 实寄封借出 / 归还流转记录 */
+  loans!: Table<CoverLoan, number>
 
   constructor() {
     super(DB_NAME)
@@ -73,6 +77,11 @@ export class GbPostmarkDatabase extends Dexie {
             if (typeof rt.totalDays !== 'number') rt.totalDays = 0
           })
       })
+
+    // v3：新增实寄封借出 / 归还流转记录表
+    this.version(DB_VERSION).stores({
+      loans: '++id, coverId, borrower, loanDate, dueDate, returnDate, [coverId+returnDate]'
+    })
   }
 }
 
@@ -534,10 +543,57 @@ export async function seedIfEmpty(): Promise<void> {
   const routes = seedRoutes()
   const covers = seedCovers()
   const entries = seedStampEntries()
-  await db.transaction('rw', db.postmarks, db.covers, db.routes, db.stampEntries, async () => {
-    await db.postmarks.bulkPut(postmarks)
-    await db.routes.bulkPut(routes)
-    await db.covers.bulkPut(covers)
-    await db.stampEntries.bulkPut(entries)
-  })
+  const loans = seedLoans()
+  await db.transaction(
+    'rw',
+    db.postmarks,
+    db.covers,
+    db.routes,
+    db.stampEntries,
+    db.loans,
+    async () => {
+      await db.postmarks.bulkPut(postmarks)
+      await db.routes.bulkPut(routes)
+      await db.covers.bulkPut(covers)
+      await db.stampEntries.bulkPut(entries)
+      await db.loans.bulkPut(loans)
+    }
+  )
+}
+
+/**
+ * 样例流转记录：CV-0002 借给邮展、已逾期未还；CV-0001 曾借与同行研究、已按期归还。
+ * 借出日期相对今天生成，保证打开页面就能看到逾期提示。
+ */
+function seedLoans(): CoverLoan[] {
+  const loanDate = addDays(todayLocal(), -30)
+  const dueDate = addDays(todayLocal(), -8)
+  const pastLoanDate = addDays(todayLocal(), -120)
+  const pastDueDate = addDays(todayLocal(), -90)
+  return [
+    {
+      id: 1,
+      coverId: 2,
+      borrower: '市博物馆近代邮政专题展',
+      purpose: '近代邮政专题展览借展，展期两月',
+      loanDate,
+      dueDate,
+      returnDate: '',
+      returnCondition: '',
+      createdAt: SEED_TS,
+      updatedAt: SEED_TS
+    },
+    {
+      id: 2,
+      coverId: 1,
+      borrower: '邮友 周明远',
+      purpose: '沪宁铁路邮路票戳关系对照研究',
+      loanDate: pastLoanDate,
+      dueDate: pastDueDate,
+      returnDate: addDays(pastDueDate, -2),
+      returnCondition: '完好如初，封背中转戳无磨损，已入甲册原位。',
+      createdAt: SEED_TS,
+      updatedAt: SEED_TS
+    }
+  ]
 }

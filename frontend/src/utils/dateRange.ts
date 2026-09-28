@@ -70,6 +70,14 @@ export function daysBetween(a: string, b: string): number | null {
   return Math.round((tb - ta) / 86400000)
 }
 
+/** 本地时区的今天，返回 YYYY-MM-DD（逾期天数按自然日计算，避免 UTC 日界误差）。 */
+export function todayLocal(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
 /** 日期加天数，返回 YYYY-MM-DD。 */
 export function addDays(date: string, days: number): string {
   if (!isValidDate(date)) return ''
