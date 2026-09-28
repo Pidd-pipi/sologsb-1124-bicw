@@ -6,6 +6,7 @@ import ScarceTag from '@/components/common/ScarceTag.vue'
 import StampCard from '@/components/common/StampCard.vue'
 import { useCatalogFilter } from '@/hooks/useCatalogFilter'
 import { useCoverStore } from '@/stores/coverStore'
+import { useLoanStore } from '@/stores/loanStore'
 import { usePostmarkStore } from '@/stores/postmarkStore'
 import { useRouteStore } from '@/stores/routeStore'
 import type { Cover } from '@/types/cover'
@@ -18,6 +19,7 @@ import { parseEraRange, toGanzhi } from '@/utils/dateRange'
 const router = useRouter()
 const postmarkStore = usePostmarkStore()
 const coverStore = useCoverStore()
+const loanStore = useLoanStore()
 const routeStore = useRouteStore()
 
 const keyword = ref('')
@@ -37,8 +39,13 @@ const eraHint = computed(() => {
 onMounted(async () => {
   if (!postmarkStore.loaded) await postmarkStore.load()
   if (!coverStore.loaded) await coverStore.load()
+  if (!loanStore.loaded) await loanStore.load()
   if (!routeStore.loaded) await routeStore.load()
 })
+
+function activeLoanOf(cover: Cover) {
+  return typeof cover.id === 'number' ? (loanStore.activeByCover.get(cover.id) ?? null) : null
+}
 
 watch([keyword, era], () => {
   for (const filter of [pmFilter.filters, coverFilter.filters, routeFilter.filters]) {
@@ -172,6 +179,7 @@ function resetAll(): void {
           :cover="cover"
           :stamp-count="coverStore.frankingCount(cover)"
           :pm-count="coverStore.cancelCount(cover)"
+          :active-loan="activeLoanOf(cover)"
           @select="openCover"
         />
       </div>

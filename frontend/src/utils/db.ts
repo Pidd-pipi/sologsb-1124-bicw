@@ -8,10 +8,11 @@ import type { Cover } from '@/types/cover'
 import type { PostalRoute } from '@/types/route'
 import type { StamplessEntry } from '@/types/stampentry'
 import type { AssetOwnerType, AssetSide, CatalogAsset } from '@/types/asset'
+import type { LoanRecord } from '@/types/loan'
 
 export const DB_NAME = 'gbpostmark'
 /** 当前数据结构版本号，升级迁移写在下面对应的 version() 中 */
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 export class GbPostmarkDatabase extends Dexie {
   postmarks!: Table<Postmark, number>
@@ -20,6 +21,8 @@ export class GbPostmarkDatabase extends Dexie {
   stampEntries!: Table<StamplessEntry, number>
   /** 戳样 / 封图原图，单独建表 */
   assets!: Table<CatalogAsset, number>
+  /** 实寄封借出 / 归还流转记录 */
+  loans!: Table<LoanRecord, number>
 
   constructor() {
     super(DB_NAME)
@@ -73,6 +76,18 @@ export class GbPostmarkDatabase extends Dexie {
             if (typeof rt.totalDays !== 'number') rt.totalDays = 0
           })
       })
+
+    // v3：新增实寄封流转记录表（借出 / 归还登记）
+    this.version(DB_VERSION).stores({
+      postmarks:
+        '++id, pmNo, type, office, province, yearFrom, yearTo, scarceLevel, inkColor, bilingual',
+      covers:
+        '++id, coverNo, sentFrom, sentTo, postDate, conditionGrade, registered, routeId, acquireFrom',
+      routes: '++id, routeNo, name, era, transport, totalDays',
+      stampEntries: '++id, coverId, stampName, variety, issueYear',
+      assets: '++id, ownerType, ownerId, side, [ownerType+ownerId]',
+      loans: '++id, coverId, borrower, loanDate, dueDate, returnedDate'
+    })
   }
 }
 
@@ -526,6 +541,47 @@ function seedStampEntries(): StamplessEntry[] {
   ]
 }
 
+function seedLoans(): LoanRecord[] {
+  return [
+    {
+      id: 1,
+      coverId: 1,
+      borrower: '市邮政博物馆',
+      purpose: '展览',
+      loanDate: '2024-03-01',
+      dueDate: '2024-03-20',
+      returnedDate: '2024-03-18',
+      returnCondition: '布展归还，封背中转戳无磨损，整体仍为上品。',
+      createdAt: SEED_TS,
+      updatedAt: SEED_TS
+    },
+    {
+      id: 2,
+      coverId: 2,
+      borrower: '津浦邮路研究会 周慕韩',
+      purpose: '研究',
+      loanDate: '2026-08-10',
+      dueDate: '2026-09-10',
+      returnedDate: '',
+      returnCondition: '',
+      createdAt: SEED_TS,
+      updatedAt: SEED_TS
+    },
+    {
+      id: 3,
+      coverId: 3,
+      borrower: '武汉邮史小组',
+      purpose: '展览',
+      loanDate: '2025-11-02',
+      dueDate: '2025-11-30',
+      returnedDate: '2025-12-02',
+      returnCondition: '逾期两日归还；原水渍边缘略加深，封舌裂口无扩展。',
+      createdAt: SEED_TS,
+      updatedAt: SEED_TS
+    }
+  ]
+}
+
 /** 首次运行写入样例数据，保证每个页面都有可编目的内容。 */
 export async function seedIfEmpty(): Promise<void> {
   const count = await db.postmarks.count()
@@ -534,10 +590,20 @@ export async function seedIfEmpty(): Promise<void> {
   const routes = seedRoutes()
   const covers = seedCovers()
   const entries = seedStampEntries()
-  await db.transaction('rw', db.postmarks, db.covers, db.routes, db.stampEntries, async () => {
-    await db.postmarks.bulkPut(postmarks)
-    await db.routes.bulkPut(routes)
-    await db.covers.bulkPut(covers)
-    await db.stampEntries.bulkPut(entries)
-  })
+  const loans = seedLoans()
+  await db.transaction(
+    'rw',
+    db.postmarks,
+    db.covers,
+    db.routes,
+    db.stampEntries,
+    db.loans,
+    async () => {
+      await db.postmarks.bulkPut(postmarks)
+      await db.routes.bulkPut(routes)
+      await db.covers.bulkPut(covers)
+      await db.stampEntries.bulkPut(entries)
+      await db.loans.bulkPut(loans)
+    }
+  )
 }

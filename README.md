@@ -27,7 +27,7 @@ docker compose down
 | 语言 | TypeScript（`strict`，构建时 `vue-tsc` 类型检查零错误） |
 | 构建 | Vite 6 |
 | UI | Element Plus + `@element-plus/icons-vue` |
-| 状态 | Pinia（`postmarkStore` / `coverStore` / `routeStore`） |
+| 状态 | Pinia（`postmarkStore` / `coverStore` / `routeStore` / `loanStore`） |
 | 路由 | Vue Router 4（history 模式，nginx `try_files` 兜底） |
 | 本地数据 | IndexedDB（Dexie，含版本号与升级迁移）+ localStorage（表单草稿） |
 | 托管 | nginx:alpine（gzip + SPA 回退） |
@@ -40,8 +40,16 @@ docker compose down
 | Cover 实寄封 | `frontend/src/types/cover.ts` | 封号、寄出/收件地、寄出/到达日期、贴票构成、关联邮戳、邮路、中转地、给据、品相、来源、购入价、藏册页位 |
 | PostalRoute 邮路 | `frontend/src/types/route.ts` | 邮路号、名称、时期、运输方式、节点数组（局所/到达日期/中转戳）、全程天数、班期、备注 |
 | StamplessEntry 票戳组合 | `frontend/src/types/stampentry.ts` | 所属封、邮票名称、面值、发行年份、齿度、变体、封上位置 |
+| LoanRecord 流转记录 | `frontend/src/types/loan.ts` | 所属封、借用人、用途、借出日、约定归还日、实际归还日、归还品相说明 |
 
 另有 `frontend/src/types/asset.ts`：戳样与封的正反面原图在 IndexedDB 中**单独建表**（`assets`）。
+
+### 实寄封流转（借出 / 归还）
+
+- 在实寄封详情页登记借出：借用人、用途、借出日、约定归还日；归还时补填实际归还日与品相说明。
+- **同一封存在未归还记录期间不能再登记新的借出**；归还后历史完整保留，并可再次借出。
+- 约定归还日已过仍未归还时，详情页顶部横幅、封目录（卡片与表格）显示逾期天数；逾期天数按本地日期实时计算（`frontend/src/utils/loan.ts`）。
+- 删除实寄封时级联清除其全部流转记录。
 
 ## 四、页面与路由
 
@@ -50,7 +58,7 @@ docker compose down
 | `/` | 重定向到 `/postmarks` | — |
 | `/postmarks` | 邮戳目录（按戳型、局所、年代区间筛选，图片墙 ↔ 列表切换） | Postmark |
 | `/covers` | 实寄封目录（按收寄地、年代、品相、是否给据筛选，行内显示贴票枚数与关联邮戳数） | Cover |
-| `/covers/:id` | 实寄封详情（正反面图、票戳组合表、寄递事实时间轴） | Cover、StamplessEntry、PostalRoute |
+| `/covers/:id` | 实寄封详情（正反面图、票戳组合表、寄递事实时间轴、借出/归还流转记录与逾期提示） | Cover、StamplessEntry、PostalRoute、LoanRecord |
 | `/routes/:id` | 邮路编辑器（节点拖拽排序、增删中转地、按节点日期自动算全程天数） | PostalRoute |
 | `/search` | 综合检索（跨三类按关键词与年代分组检索） | Postmark、Cover、PostalRoute |
 
@@ -58,7 +66,7 @@ docker compose down
 
 - 组件：`frontend/src/components/common/` 下的 `StampCard.vue`、`CoverCard.vue`、`RouteTimeline.vue`、`ScarceTag.vue`
 - hooks：`frontend/src/hooks/useCatalogFilter.ts`（统一过滤与排序）、`frontend/src/hooks/useCoverRoute.ts`（寄递时间轴与在途天数）
-- utils：`frontend/src/utils/db.ts`（Dexie 封装/版本迁移/样例数据）、`frontend/src/utils/dateRange.ts`（年代区间、干支互转、日期先后校验）、`frontend/src/utils/id.ts`（编目号与唯一键）、`frontend/src/utils/draft.ts`（localStorage 草稿）
+- utils：`frontend/src/utils/db.ts`（Dexie 封装/版本迁移/样例数据）、`frontend/src/utils/loan.ts`（当前借出与逾期天数）、`frontend/src/utils/dateRange.ts`（年代区间、干支互转、日期先后校验）、`frontend/src/utils/id.ts`（编目号与唯一键）、`frontend/src/utils/draft.ts`（localStorage 草稿）
 
 ## 六、本地开发（可选，需要本机 Node 20+）
 
@@ -99,6 +107,6 @@ sologsb-1124/
 
 ## 八、数据存储说明
 
-- **编目数据**：IndexedDB（Dexie，库名 `gbpostmark`）。表结构含版本号，`version(2)` 会把戳样与封图迁移到独立的 `assets` 表并补齐历史记录缺省字段；首次运行写入样例数据，便于直接查看各页面效果。
+- **编目数据**：IndexedDB（Dexie，库名 `gbpostmark`）。表结构含版本号：`version(2)` 把戳样与封图迁移到独立的 `assets` 表并补齐历史记录缺省字段；`version(3)` 新增 `loans` 表保存实寄封借出/归还流转记录（旧库自动升级）。首次运行写入样例数据，便于直接查看各页面效果。
 - **表单草稿**：localStorage，键名前缀 `gbpostmark:draft:`（邮戳、实寄封、邮路各一份），刷新或误关页面后可恢复，可一键清除。
 - **无后端**：不请求任何外部接口，容器无状态，不使用数据库服务与命名卷；清除浏览器站点数据即等于清空数据。

@@ -1,30 +1,36 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import RouteTimeline from '@/components/common/RouteTimeline.vue'
 import ScarceTag from '@/components/common/ScarceTag.vue'
 import StampCard from '@/components/common/StampCard.vue'
 import { useCoverRoute } from '@/hooks/useCoverRoute'
 import { useCoverStore } from '@/stores/coverStore'
+import { useLoanStore } from '@/stores/loanStore'
 import { usePostmarkStore } from '@/stores/postmarkStore'
 import { useRouteStore } from '@/stores/routeStore'
 import type { Postmark } from '@/types/postmark'
 import type { TimelineNode } from '@/types/route'
 import type { StamplessEntry } from '@/types/stampentry'
+import type { LoanRecord } from '@/types/loan'
 import {
   COVER_POSITIONS,
   VARIETY_TYPES,
   createEmptyStampEntry
 } from '@/types/stampentry'
+import { LOAN_PURPOSES, createEmptyLoan } from '@/types/loan'
 import { CONDITION_GRADES } from '@/types/cover'
 import { loadAssets, saveAsset } from '@/utils/db'
 import { nowIso } from '@/utils/id'
+import { addDays } from '@/utils/dateRange'
+import { loanStatus, todayLocal } from '@/utils/loan'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
 const coverStore = useCoverStore()
+const loanStore = useLoanStore()
 const postmarkStore = usePostmarkStore()
 const routeStore = useRouteStore()
 
@@ -46,9 +52,19 @@ const activePostmark = ref<Postmark | null>(null)
 const entryForm = reactive<StamplessEntry>(createEmptyStampEntry(0))
 
 const entries = computed<StamplessEntry[]>(() => coverStore.entriesOf(coverId.value))
+const loans = computed<LoanRecord[]>(() => loanStore.loansOf(coverId.value))
+const activeLoan = computed<LoanRecord | null>(() => loanStore.activeOf(coverId.value))
+const activeLoanStatus = computed(() => loanStatus(activeLoan.value))
+
+const loanDialog = ref(false)
+const loanForm = reactive<LoanRecord>(createEmptyLoan(0))
+
+const returnDialog = ref(false)
+const returnForm = reactive({ id: 0, returnedDate: '', returnCondition: '' })
 
 onMounted(async () => {
   if (!coverStore.loaded) await coverStore.load()
+  if (!loanStore.loaded) await loanStore.load()
   if (!postmarkStore.loaded) await postmarkStore.load()
   if (!routeStore.loaded) await routeStore.load()
   await loadAssetsForCover()
@@ -142,6 +158,74 @@ async function removeEntry(entry: StamplessEntry): Promise<void> {
   ElMessage.success('已移除该组合')
 }
 
+function openLoanDialog(): void {
+  const id = coverId.value
+  if (id == null) return
+  if (activeLoan.value) {
+    ElMessage.warning('该封尚未归还，无法登记新的借出')
+    return
+  }
+  Object.assign(loanForm, createEmptyLoan(id))
+  loanForm.loanDate = todayLocal()
+  loanForm.dueDate = addDays(loanForm.loanDate, 14)
+  loanDialog.value = true
+}
+
+async function submitLoan(): Promise<void> {
+  const id = coverId.value
+  if (id == null) return
+  try {
+    await loanStore.createLoan({
+      coverId: id,
+      borrower: loanForm.borrower,
+      purpose: loanForm.purpose,
+      loanDate: loanForm.loanDate,
+      dueDate: loanForm.dueDate
+    })
+    loanDialog.value = false
+    ElMessage.success('已登记借出')
+  } catch (err) {
+    ElMessage.warning(err instanceof Error ? err.message : '借出登记失败')
+  }
+}
+
+function openReturnDialog(): void {
+  const current = activeLoan.value
+  if (!current || typeof current.id !== 'number') return
+  returnForm.id = current.id
+  returnForm.returnedDate = todayLocal()
+  returnForm.returnCondition = ''
+  returnDialog.value = true
+}
+
+async function submitReturn(): Promise<void> {
+  try {
+    await loanStore.returnLoan(returnForm.id, {
+      returnedDate: returnForm.returnedDate,
+      returnCondition: returnForm.returnCondition
+    })
+    returnDialog.value = false
+    ElMessage.success('已登记归还')
+  } catch (err) {
+    ElMessage.warning(err instanceof Error ? err.message : '归还登记失败')
+  }
+}
+
+async function removeLoan(loan: LoanRecord): Promise<void> {
+  if (typeof loan.id !== 'number') return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除 ${loan.loanDate} 借予 ${loan.borrower} 的这条流转记录吗？删除后不可恢复。`,
+      '删除流转记录',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  await loanStore.removeLoan(loan.id)
+  ElMessage.success('已删除该流转记录')
+}
+
 function buildExportText(): string {
   const c = cover.value
   if (!c) return ''
@@ -226,6 +310,24 @@ function openRoute(): void {
     <p v-if="error" class="gb-empty">{{ error }}</p>
 
     <template v-else-if="cover">
+      <el-alert
+        v-if="activeLoan"
+        :type="activeLoanStatus.overdue ? 'error' : 'warning'"
+        :closable="false"
+        show-icon
+        class="cover-detail__loan-banner"
+      >
+        <template #title>
+          <template v-if="activeLoanStatus.overdue">
+            已逾期 {{ activeLoanStatus.overdueDays }} 天未归还
+          </template>
+          <template v-else>该封当前借出在外</template>
+          ：{{ activeLoan.borrower }}
+          <template v-if="activeLoan.purpose">（{{ activeLoan.purpose }}）</template>
+          · 借出 {{ activeLoan.loanDate }} · 约定归还 {{ activeLoan.dueDate }}
+        </template>
+      </el-alert>
+
       <section class="gb-panel">
         <h2 class="gb-panel__title">寄递事实</h2>
         <dl class="gb-facts">
@@ -320,6 +422,56 @@ function openRoute(): void {
       </section>
 
       <section class="gb-panel">
+        <div class="cover-detail__section-head">
+          <h2 class="gb-panel__title">流转记录（{{ loans.length }} 条）</h2>
+          <span>
+            <el-button
+              v-if="activeLoan"
+              size="small"
+              type="success"
+              plain
+              @click="openReturnDialog"
+            >
+              登记归还
+            </el-button>
+            <el-button v-else size="small" type="primary" @click="openLoanDialog">登记借出</el-button>
+          </span>
+        </div>
+        <p v-if="!loans.length" class="gb-empty">尚无流转记录；外借展览或供同行研究时可在此登记。</p>
+        <el-table v-else :data="loans" border stripe>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="!row.returnedDate" :type="loanStatus(row).overdue ? 'danger' : 'warning'">
+                {{ loanStatus(row).overdue ? `逾期 ${loanStatus(row).overdueDays} 天` : '借出中' }}
+              </el-tag>
+              <el-tag v-else type="success" effect="plain">已归还</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="borrower" label="借用人" min-width="150" />
+          <el-table-column prop="purpose" label="用途" width="90" />
+          <el-table-column prop="loanDate" label="借出日" width="115" />
+          <el-table-column prop="dueDate" label="约定归还日" width="115" />
+          <el-table-column label="实际归还日" width="115">
+            <template #default="{ row }">
+              <span :class="{ 'cover-detail__overdue-text': !row.returnedDate && loanStatus(row).overdue }">
+                {{ row.returnedDate || '未归还' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="归还品相说明" min-width="200">
+            <template #default="{ row }">
+              <span>{{ row.returnCondition || (row.returnedDate ? '—' : '归还时补填') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90">
+            <template #default="{ row }">
+              <el-button size="small" link type="danger" @click="removeLoan(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
+
+      <section class="gb-panel">
         <h2 class="gb-panel__title">关联邮戳（{{ cancelPostmarks.length }} 枚）</h2>
         <p v-if="!cancelPostmarks.length" class="gb-empty">该封尚未关联销票邮戳。</p>
         <div v-else class="gb-grid">
@@ -390,10 +542,84 @@ function openRoute(): void {
         <ScarceTag :level="activePostmark.scarceLevel" />
       </div>
     </el-dialog>
+
+    <el-dialog v-model="loanDialog" title="登记借出" width="520px">
+      <el-form label-width="104px">
+        <el-form-item label="借用人" required>
+          <el-input v-model="loanForm.borrower" placeholder="同行姓名 / 展览或机构名" />
+        </el-form-item>
+        <el-form-item label="用途">
+          <el-select
+            v-model="loanForm.purpose"
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="选择或输入用途"
+            style="width: 100%"
+          >
+            <el-option v-for="p in LOAN_PURPOSES" :key="p" :label="p" :value="p" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="借出日" required>
+          <el-date-picker
+            v-model="loanForm.loanDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="约定归还日" required>
+          <el-date-picker
+            v-model="loanForm.dueDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :disabled-date="(d: Date) => loanForm.loanDate ? d < new Date(`${loanForm.loanDate}T00:00:00`) : false"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="loanDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitLoan">保存借出</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="returnDialog" title="登记归还" width="520px">
+      <el-form label-width="104px">
+        <el-form-item label="实际归还日" required>
+          <el-date-picker
+            v-model="returnForm.returnedDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="品相说明">
+          <el-input
+            v-model="returnForm.returnCondition"
+            type="textarea"
+            :rows="3"
+            placeholder="归还时核对封体、票戳有无磨损、污渍等；无异常可填“完好”"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="returnDialog = false">取消</el-button>
+        <el-button type="success" @click="submitReturn">确认归还</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
+.cover-detail__loan-banner {
+  margin-bottom: 16px;
+}
+.cover-detail__overdue-text {
+  color: #c45656;
+  font-weight: 600;
+}
 .cover-detail__no {
   color: #5d3325;
   font-size: 18px;

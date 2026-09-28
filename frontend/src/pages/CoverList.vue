@@ -7,6 +7,7 @@ import CoverCard from '@/components/common/CoverCard.vue'
 import ScarceTag from '@/components/common/ScarceTag.vue'
 import { useCatalogFilter } from '@/hooks/useCatalogFilter'
 import { useCoverStore } from '@/stores/coverStore'
+import { useLoanStore } from '@/stores/loanStore'
 import { usePostmarkStore } from '@/stores/postmarkStore'
 import { useRouteStore } from '@/stores/routeStore'
 import type { ImagePayload } from '@/stores/postmarkStore'
@@ -14,9 +15,11 @@ import type { Cover, FrankingItem } from '@/types/cover'
 import { CONDITION_GRADES, createEmptyCover } from '@/types/cover'
 import { clearDraft, loadDraft, saveDraft } from '@/utils/draft'
 import { joinCn, nowIso, toNumber } from '@/utils/id'
+import { loanStatus } from '@/utils/loan'
 
 const router = useRouter()
 const coverStore = useCoverStore()
+const loanStore = useLoanStore()
 const postmarkStore = usePostmarkStore()
 const routeStore = useRouteStore()
 
@@ -32,9 +35,14 @@ const draftHint = ref('')
 
 onMounted(async () => {
   if (!coverStore.loaded) await coverStore.load()
+  if (!loanStore.loaded) await loanStore.load()
   if (!postmarkStore.loaded) await postmarkStore.load()
   if (!routeStore.loaded) await routeStore.load()
 })
+
+function activeLoanOf(cover: Cover) {
+  return typeof cover.id === 'number' ? (loanStore.activeByCover.get(cover.id) ?? null) : null
+}
 
 watch(
   form,
@@ -172,7 +180,9 @@ function routeLabel(routeId: number | null): string {
       <div>
         <h1 class="gb-page__title">实寄封目录</h1>
         <p class="gb-page__subtitle">
-          共 {{ coverStore.total }} 封，其中给据邮件 {{ coverStore.registeredCount }} 封；按收寄地、年代、品相、是否给据筛选。
+          共 {{ coverStore.total }} 封，其中给据邮件 {{ coverStore.registeredCount }} 封；借出在外
+          {{ loanStore.onLoanCount }} 封<template v-if="loanStore.overdueCount">，逾期未还
+          <strong class="cover-page__overdue">{{ loanStore.overdueCount }} 封</strong></template>。
         </p>
       </div>
       <div class="cover-page__actions">
@@ -231,6 +241,7 @@ function routeLabel(routeId: number | null): string {
         :cover="cover"
         :stamp-count="coverStore.frankingCount(cover)"
         :pm-count="coverStore.cancelCount(cover)"
+        :active-loan="activeLoanOf(cover)"
         @select="openDetail"
       />
     </div>
@@ -261,6 +272,24 @@ function routeLabel(routeId: number | null): string {
       </el-table-column>
       <el-table-column label="给据" width="80">
         <template #default="{ row }">{{ row.registered ? '是' : '否' }}</template>
+      </el-table-column>
+      <el-table-column label="流转状态" width="150">
+        <template #default="{ row }">
+          <template v-if="activeLoanOf(row)">
+            <el-tag
+              size="small"
+              :type="loanStatus(activeLoanOf(row)).overdue ? 'danger' : 'warning'"
+              effect="plain"
+            >
+              {{
+                loanStatus(activeLoanOf(row)).overdue
+                  ? `逾期 ${loanStatus(activeLoanOf(row)).overdueDays} 天`
+                  : '借出中'
+              }}
+            </el-tag>
+          </template>
+          <span v-else class="cover-page__in-shelf">在藏</span>
+        </template>
       </el-table-column>
       <el-table-column label="邮路" min-width="150">
         <template #default="{ row }">{{ routeLabel(row.routeId) }}</template>
@@ -472,6 +501,13 @@ function routeLabel(routeId: number | null): string {
 </template>
 
 <style scoped>
+.cover-page__overdue {
+  color: #c45656;
+}
+.cover-page__in-shelf {
+  font-size: 12px;
+  color: var(--gb-muted);
+}
 .cover-page__actions {
   display: flex;
   gap: 10px;

@@ -5,6 +5,7 @@ import type { Cover, FrankingItem } from '@/types/cover'
 import type { StamplessEntry } from '@/types/stampentry'
 import { nextSerialNo, nowIso } from '@/utils/id'
 import type { ImagePayload } from './postmarkStore'
+import { useLoanStore } from './loanStore'
 
 export const useCoverStore = defineStore('cover', () => {
   const list = ref<Cover[]>([])
@@ -70,6 +71,7 @@ export const useCoverStore = defineStore('cover', () => {
     await db.covers.delete(id)
     const own = await db.stampEntries.where('coverId').equals(id).toArray()
     await db.stampEntries.bulkDelete(own.map((e) => e.id).filter((v): v is number => typeof v === 'number'))
+    await useLoanStore().removeForCover(id)
     await load()
   }
 

@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Cover } from '@/types/cover'
+import type { LoanRecord } from '@/types/loan'
 import { joinCn } from '@/utils/id'
+import { loanStatus } from '@/utils/loan'
 import ScarceTag from './ScarceTag.vue'
 
 const props = withDefaults(
@@ -10,9 +13,11 @@ const props = withDefaults(
     stampCount?: number
     /** 关联邮戳数，行内展示 */
     pmCount?: number
+    /** 当前未归还的流转记录，存在时展示借出/逾期状态 */
+    activeLoan?: LoanRecord | null
     active?: boolean
   }>(),
-  { stampCount: 0, pmCount: 0, active: false }
+  { stampCount: 0, pmCount: 0, activeLoan: null, active: false }
 )
 
 const emit = defineEmits<{ select: [cover: Cover] }>()
@@ -24,6 +29,8 @@ function onSelect(): void {
 function routeText(cover: Cover): string {
   return `${cover.sentFrom || '寄出地待考'} → ${cover.sentTo || '收件地待考'}`
 }
+
+const status = computed(() => loanStatus(props.activeLoan))
 </script>
 
 <template>
@@ -36,11 +43,21 @@ function routeText(cover: Cover): string {
       <header class="cover-card__head">
         <span class="cover-card__no">{{ cover.coverNo }}</span>
         <span class="cover-card__tags">
+          <el-tag v-if="status.overdue" size="small" type="danger">逾期 {{ status.overdueDays }} 天</el-tag>
+          <el-tag v-else-if="status.onLoan" size="small" type="warning" effect="plain">借出中</el-tag>
           <el-tag v-if="cover.registered" size="small" type="danger" effect="plain">给据</el-tag>
           <ScarceTag :level="cover.conditionGrade" kind="grade" />
         </span>
       </header>
       <p class="cover-card__route">{{ routeText(cover) }}</p>
+      <p v-if="activeLoan" class="cover-card__loan" :class="{ 'cover-card__loan--overdue': status.overdue }">
+        <template v-if="status.overdue">
+          ⚠ 已逾期 {{ status.overdueDays }} 天：{{ activeLoan.borrower }} · 应还 {{ activeLoan.dueDate }}
+        </template>
+        <template v-else>
+          借出中：{{ activeLoan.borrower }} · 应还 {{ activeLoan.dueDate }}
+        </template>
+      </p>
       <p class="cover-card__meta">
         寄出 {{ cover.postDate || '待考' }} · 到达 {{ cover.arriveDate || '待考' }}
       </p>
@@ -112,6 +129,24 @@ function routeText(cover: Cover): string {
   font-size: 15px;
   font-weight: 600;
   color: #3f3226;
+}
+.cover-card__loan {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b06f16;
+  background: #fdf5e6;
+  border: 1px solid #ecd3a5;
+  border-radius: 6px;
+  padding: 2px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cover-card__loan--overdue {
+  color: #c45656;
+  background: #fef0f0;
+  border-color: #fbc4c4;
 }
 .cover-card__meta,
 .cover-card__via {
